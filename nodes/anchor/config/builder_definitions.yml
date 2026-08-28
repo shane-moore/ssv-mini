@@ -1,0 +1,21 @@
+# Direct builder connections (Gloas / ePBS) for the Anchor operators in this enclave.
+#
+# Injected byte-identically into every Anchor operator's data dir when the params file sets
+# `anchor_builder_definitions: true`. Byte-identical content across operators is mandatory: the
+# cluster threshold-signs each builder's request auth and the signed bytes include the auth data,
+# which defaults here to the UTF-8 bytes of `url`. One differing byte fragments the signing roots
+# and the builder is dropped wherever fewer than a quorum of operators share its exact bytes.
+#
+# `url` must match the builder stub's service name and port exactly
+# (nodes/builder_stub/node.star). It is not just routing: with `auth_data` omitted it IS the
+# signed auth data, so editing one without the other changes what the cluster signs.
+#
+# `auth_data` is deliberately omitted so it defaults to the URL bytes, which is also what a real
+# builder requires: buildoor rejects any submission whose auth data is not its own URL (HTTP 400),
+# even though the keymanager schema permits a shared secret.
+min_bid: 0
+builder_boost_factor: 100
+builders:
+  - enabled: true
+    url: "http://builder-stub:8080"
+    max_execution_payment: 1000000000

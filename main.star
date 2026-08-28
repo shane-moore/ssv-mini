@@ -3,6 +3,7 @@ input_parser = import_module("github.com/ethpandaops/ethereum-package/src/packag
 genesis_constants = import_module("github.com/ethpandaops/ethereum-package/src/prelaunch_data_generator/genesis_constants/genesis_constants.star@6.1.0")
 ssv_node = import_module("./nodes/ssv/node.star")
 anchor_node = import_module("./nodes/anchor/node.star")
+builder_stub = import_module("./nodes/builder_stub/node.star")
 blocks = import_module("./blockchain/blocks.star")
 utils = import_module("./utils/utils.star")
 deployer = import_module("./contract/deployer.star")
@@ -176,7 +177,10 @@ def run(plan, args):
     if anchor_node_count > 0:
         plan.print("Step 5/5: Starting {} Anchor + {} SSV nodes".format(anchor_node_count, ssv_node_count))
         config = utils.anchor_testnet_artifact(plan, args)
-        enr = anchor_node.start(plan, anchor_node_count, cl_url, el_rpc, el_ws, pem_artifacts, config, anchor_image)
+        builder_definitions = args.get("anchor_builder_definitions", False)
+        if builder_definitions:
+            builder_stub.start(plan)
+        enr = anchor_node.start(plan, anchor_node_count, cl_url, el_rpc, el_ws, pem_artifacts, config, anchor_image, builder_definitions)
     else:
         plan.print("Step 5/5: Starting {} SSV nodes".format(ssv_node_count))
 

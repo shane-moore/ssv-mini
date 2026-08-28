@@ -5,11 +5,22 @@ ANCHOR_METRICS_PORT_NAME = "metrics"
 ANCHOR_METRICS_PORT = 5164
 
 # Start anchor nodes: first node starts alone (to get ENR), remaining start in parallel
-def start(plan, num_nodes, cl_url, el_rpc, el_ws, key_pems, config, image):
+def start(plan, num_nodes, cl_url, el_rpc, el_ws, key_pems, config, image, builder_definitions=False):
     IP_PLACEHOLDER = "KURTOSIS_IP_ADDR_PLACEHOLDER"
 
+    # Direct builder connections (Gloas / ePBS). Uploaded ONCE and reused by every operator, so
+    # the file is byte-identical across the cluster by construction: the operators threshold-sign
+    # each builder's request auth, and diverging bytes fragment the signing roots.
+    builder_defs = None
+    if builder_definitions:
+        builder_defs = plan.upload_files(
+            "./config/builder_definitions.yml",
+            name="anchor-builder-definitions",
+            description="Uploading builder definitions shared by all Anchor operators",
+        )
+
     # Start the first node (bootnode)
-    files = get_anchor_files(plan, 0, key_pems[0], config)
+    files = get_anchor_files(plan, 0, key_pems[0], config, builder_defs)
     command_arr = [
         "node", "--testnet-dir", "/opt/testnet", "--beacon-nodes", cl_url,
         "--execution-rpc", el_rpc, "--execution-ws", el_ws, "--datadir", "/opt/data",
@@ -63,7 +74,7 @@ def start(plan, num_nodes, cl_url, el_rpc, el_ws, key_pems, config, image):
         remaining_configs = {}
         for index in range(1, num_nodes):
             name = "anchor-node-{}".format(index)
-            files = get_anchor_files(plan, index, key_pems[index], config)
+            files = get_anchor_files(plan, index, key_pems[index], config, builder_defs)
             remaining_configs[name] = ServiceConfig(
                 image=image,
                 entrypoint=["anchor"],
@@ -76,15 +87,21 @@ def start(plan, num_nodes, cl_url, el_rpc, el_ws, key_pems, config, image):
 
     return enr
 
-def get_anchor_files(plan, index, key_pem, config):
+def get_anchor_files(plan, index, key_pem, config, builder_defs=None):
+    # Anchor reads builder_definitions.yml from the data dir root, so it rides the same mount as
+    # the operator key rather than a separate one.
+    data_dir = key_pem
+    if builder_defs != None:
+        data_dir = Directory(artifact_names=[key_pem, builder_defs])
+
     if index == 0:
         return {
-            "/opt/data": key_pem,
+            "/opt/data": data_dir,
             "/opt/network": plan.upload_files("./config/key"),
             "/opt/testnet": config,
         }
     else:
         return {
-            "/opt/data": key_pem,
+            "/opt/data": data_dir,
             "/opt/testnet": config,
         }

@@ -1,0 +1,96 @@
+# sigp/anchor #1280 (PR #1285): builder-preferences service wiring, end to end.
+#
+# What this run exercises that no earlier profile could: Anchor spawns Lighthouse's
+# BuilderPreferencesService at the Gloas fork, threshold-signs a BuilderRequestAuth per proposer
+# duty, and publishes builder preferences to its beacon node, which fans them out to the builder.
+#
+# Three deliberate departures from params-anchor-1271-ring-gloas.yaml (the proven Anchor-on-Gloas
+# base), each load-bearing:
+#
+# 1. cl_type is LIGHTHOUSE, not Lodestar. The whole direct-builder flow (the VC->BN route
+#    POST /eth/v1/validator/builder_preferences, and the BN->builder fan-out) exists only in the
+#    unmerged Lighthouse builder-API stack that Anchor pins. Lodestar predates the spec merge
+#    (beacon-APIs #630, merged 2026-08-24) and has no such route, so the preferences POST would
+#    404 and nothing downstream could be observed. The image below is built locally from Anchor's
+#    exact pin, rev 44f442479 ("Migrate the validator client to the Gloas builder API 5/5"); it is
+#    NOT a release image and has no registry digest, so record its image ID per run. Lodestar was
+#    originally pinned here because lighthouse v8.2.0 404s the envelope-produce endpoint; the pin
+#    build implements it (get_validator_execution_payload_envelopes), so that reason is gone.
+#    This is the profile's biggest unknown: the pin tracks a later ePBS spec revision than the
+#    digest-pinned devnet-6 geth below. Treat a failure to reach or survive the Gloas fork as an
+#    EL/CL spec-version mismatch first, not as an Anchor defect.
+#
+# 2. A local builder STUB (nodes/builder_stub), not ethpandaops/buildoor. buildoor is the real
+#    ePBS builder and would additionally verify the BLS signature on our threshold-reconstructed
+#    SignedRequestAuthV1, but it is unreachable from here today: ethereum-package 6.1.0's launcher
+#    (April) passes --builder-api-port, which every buildoor build since at least 2026-08-21 has
+#    removed, while the flag needed for the preferences owner-check, --builder-api-url, exists only
+#    in those newer builds. No buildoor image satisfies both, and the endpoint itself postdates the
+#    spec merge on 2026-08-24, so an image old enough for the launcher would not serve it at all.
+#    Running buildoor directly needs engine-API and JWT plumbing ssv-mini does not expose.
+#    The stub therefore answers exactly the one endpoint the beacon node calls and logs each
+#    submission. It proves delivery, timing, and which proposer, which is what THIS PR wires;
+#    signature correctness belongs to the signing PR and is already pinned by its known-answer test
+#    against go-ssv's golden roots. Cross-client verification against buildoor is a follow-up once
+#    the launcher catches up.
+#
+# 3. anchor_builder_definitions: true injects nodes/anchor/config/builder_definitions.yml
+#    byte-identically into all four operators' data dirs. Its url MUST match the stub's service
+#    name and port, because with auth_data omitted the URL string IS the signed auth data. The
+#    same flag also starts the stub, so the two can never drift apart in a run.
+#
+# Baseline (unchanged from the 1271 profile): 2 participants x 32 = 64 baseline validators,
+# 74 deposits, 10 static managed validators on a 4-operator committee (quorum 3), Fulu at genesis,
+# Gloas at epoch 2, Boole at genesis. Monitor stays off: it needs a go-ssv node and there are none.
+#
+# Usage:
+#   make run PARAMS_FILE=params-anchor-1280-builder-preferences.yaml ENCLAVE_NAME=anchor-1280
+network:
+  participants:
+  - el_type: geth
+    el_image: ethpandaops/geth@sha256:71252298807365697f246185b02223cdd5349fa15636f254bad041d12b4b3362
+    cl_type: lighthouse
+    cl_image: lighthouse/builder-pin:44f4424
+    validator_count: 32
+    count: 2
+    supernode: true
+  # No mev_type: the pre-ePBS relay stack (mev-boost and friends) is a different flow entirely and
+  # would only add a --builder flag to the CL that this test does not use.
+  additional_services:
+    - dora
+  dora_params:
+    image: ethpandaops/dora:master-0e63023
+  ethereum_genesis_generator_params:
+    image: ethpandaops/ethereum-genesis-generator:6.0.8
+  network_params:
+    network_id: "3151908"
+    deneb_fork_epoch: 0
+    electra_fork_epoch: 0
+    fulu_fork_epoch: 0        # Fulu must precede Gloas; activate at genesis
+    gloas_fork_epoch: 2       # ePBS fork a few minutes in: pre-fork baseline, then builder duties
+    perfect_peerdas_enabled: false
+    preregistered_validator_count: 74
+  port_publisher:
+    cl:
+      enabled: true
+use_static_keys: true
+pre_register_validators: true
+unsafe_skip_validator_layout_guard: false
+monitor:
+  enabled: false
+boole_epoch: 0   # SSV Boole fork from genesis; ePBS builds on Boole
+anchor_builder_definitions: true
+nodes:
+  ssv:
+    count: 0
+  anchor:
+    count: 4
+images:
+  ssv: "node/ssv:boole-stress-874ba31"
+  # Explicit commit tag, never the moving node/anchor:latest: that tag held a stale image from
+  # 2026-08-10 during this setup, which a tag-only check would have silently accepted.
+  anchor: "node/anchor:1280-89d01ca5"
+  monitor: "monitor"
+  redis: "redis:7.4.2"
+  postgres: "postgres:15"
+  deployer: "localssv/ssv-network:latest"
