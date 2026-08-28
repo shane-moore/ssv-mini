@@ -1,2 +1,4 @@
 /.idea/
 .params.generated.yaml
+__pycache__/
+*.pyc
